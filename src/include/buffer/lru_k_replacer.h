@@ -12,10 +12,9 @@
 
 #pragma once
 
+#include <cstddef>
 #include <limits>
-#include <list>
 #include <mutex>  // NOLINT
-#include <unordered_map>
 #include <vector>
 
 #include "common/config.h"
@@ -25,15 +24,99 @@ namespace bustub {
 
 enum class AccessType { Unknown = 0, Lookup, Scan, Index };
 
+// #define WORD_OFFSET(i) ((i) >> 6)
+// #define BIT_OFFSET(i) ((i) & 0x3f)
+// struct BitMap {
+//   size_t size_;
+//   uint64_t *data_;
+
+//   BitMap() : size_(0), data_(nullptr) {}
+//   explicit BitMap(size_t size) : size_(size) {
+//     data_ = new uint64_t[WORD_OFFSET(size) + 1];
+//     Clear();
+//   }
+//   ~BitMap() { delete[] data_; }
+//   void Clear() {
+//     size_t bm_size = WORD_OFFSET(size_);
+//     for (size_t i = 0; i <= bm_size; i++) {
+//       data_[i] = 0;
+//     }
+//   }
+//   void Fill() {
+//     size_t bm_size = WORD_OFFSET(size_);
+//     for (size_t i = 0; i < bm_size; i++) {
+//       data_[i] = 0xffffffffffffffff;
+//     }
+//     data_[bm_size] = 0;
+//     for (size_t i = (bm_size << 6); i < size_; i++) {
+//       data_[bm_size] |= 1UL << BIT_OFFSET(i);
+//     }
+//   }
+
+//   auto GetBit(size_t i) -> uint64_t { return data_[WORD_OFFSET(i)] & (1UL << BIT_OFFSET(i)); }
+
+//   void SetBit(size_t i) { data_[WORD_OFFSET(i)] |= (1UL << BIT_OFFSET(i)); }
+// };
+
 class LRUKNode {
+ public:
+  explicit LRUKNode(size_t k = 0);
+
+  auto operator<(const LRUKNode &rhs) const -> bool;
+
+  void Init(size_t k);
+
+  auto Evictable() const -> bool { return is_evictable_; }
+
+  void SetEvictable(bool set_evictable) { is_evictable_ = set_evictable; }
+
+  auto Valid() const -> bool;
+
+  void SetInvalid();
+
+  auto KDistance() -> size_t;
+
+  void Access(size_t timestamp);
+
  private:
   /** History of last seen K timestamps of this page. Least recent timestamp stored in front. */
   // Remove maybe_unused if you start using them. Feel free to change the member variables as you want.
 
-  [[maybe_unused]] std::list<size_t> history_;
-  [[maybe_unused]] size_t k_;
-  [[maybe_unused]] frame_id_t fid_;
-  [[maybe_unused]] bool is_evictable_{false};
+  std::vector<size_t> history_;
+  size_t start_{0};
+  size_t end_{0};
+  size_t k_;
+  size_t k_distance_;
+  bool is_evictable_{false};
+};
+
+class NodeHeap {
+ public:
+  NodeHeap(size_t node_num, std::vector<LRUKNode> &node_ref);
+
+  /**
+   * if node
+   * 1. has been in heap: correct position of this node in heap
+   * 2. is not in heap: create a new entry and push into heap
+   */
+  void Push(frame_id_t frame_id);
+
+  // pop an evictable node with the biggest k-distance
+  auto Pop() -> frame_id_t;
+
+  // remove specific frame in heap
+  void Remove(frame_id_t frame_id);
+
+ private:
+  std::vector<LRUKNode> &node_ref_;     // reference to node store
+  std::vector<frame_id_t> frame_heap_;  // frame_heap_[0] is a sentinel element, is the size of heap;
+  std::vector<size_t> frame_pos_map_;   // map frame id to posistion in heap
+
+  /**
+   * @brief correct node posistion
+   * @param pos posistion of the node needed to be corrected in  heap
+   */
+  void Amend(size_t pos);
 };
 
 /**
@@ -150,12 +233,13 @@ class LRUKReplacer {
  private:
   // TODO(student): implement me! You can replace these member variables as you like.
   // Remove maybe_unused if you start using them.
-  [[maybe_unused]] std::unordered_map<frame_id_t, LRUKNode> node_store_;
-  [[maybe_unused]] size_t current_timestamp_{0};
-  [[maybe_unused]] size_t curr_size_{0};
-  [[maybe_unused]] size_t replacer_size_;
-  [[maybe_unused]] size_t k_;
-  [[maybe_unused]] std::mutex latch_;
+  std::vector<LRUKNode> node_store_;
+  NodeHeap node_heap_;
+  size_t current_timestamp_{0};
+  size_t curr_size_{0};
+  size_t replacer_size_;  // max size
+  size_t k_;
+  std::mutex latch_;
 };
 
 }  // namespace bustub
