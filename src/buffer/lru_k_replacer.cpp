@@ -11,9 +11,13 @@
 //===----------------------------------------------------------------------===//
 
 #include "buffer/lru_k_replacer.h"
+#include <sys/types.h>
 #include <cstddef>
 #include <cstdint>
+#include <exception>
+#include <iostream>
 #include <mutex>
+#include <string>
 #include <utility>
 #include <vector>
 #include "common/config.h"
@@ -29,7 +33,7 @@ constexpr size_t INF = SIZE_MAX >> 1;
 
 // LRUKNode
 
-LRUKNode::LRUKNode(const size_t k) : history_(k + 1), k_(k) { k_distance_ = INF; };
+LRUKNode::LRUKNode(const size_t k) : history_(k + 1), k_(k) { k_distance_ = INF; }
 
 auto LRUKNode::operator<(const LRUKNode &rhs) const -> bool { return false; }
 
@@ -47,18 +51,19 @@ void LRUKNode::Access(const size_t timestamp) {
   }
   history_[end_++] = timestamp;
   end_ = QUEUE_POS(end_, k_);
-  if (QUEUE_SIZE(start_, end_, k_) != k_) {
-    k_distance_ = SIZE_MAX - timestamp;
+#ifdef BI_HEAP
+#else
+  if (QUEUE_SIZE(start_, end_, k_) < k_) {
+    k_distance_ = SIZE_MAX - history_[start_];
   } else {
     k_distance_ = INF - history_[start_];
   }
+#endif
 }
 
 auto LRUKNode::Valid() const -> bool { return k_ != INF; }
 
 void LRUKNode::SetInvalid() { k_ = INF; }
-
-auto LRUKNode::KDistance() -> size_t { return k_distance_; }
 
 // NodeHeap
 
@@ -68,6 +73,7 @@ NodeHeap::NodeHeap(const size_t node_num, std::vector<LRUKNode> &node_ref)
 }
 
 void NodeHeap::Push(const frame_id_t frame_id) {
+  BUSTUB_ENSURE(static_cast<size_t>(frame_id) < frame_pos_map_.size(), "overflow frame id!");
   if (frame_pos_map_[frame_id] == INF) {  // new entry
     size_t cur_pos = ++frame_heap_[0];
     auto parent_pos = cur_pos >> 1;
@@ -110,17 +116,14 @@ auto NodeHeap::Pop() -> frame_id_t {
         }
       } else {  // cur_frame is non-evictable
         auto next_pos = queue[i] << 1;
-        if (next_pos <= static_cast<uint64_t>(frame_heap_[0])) {  // left child
-
-          if (node_ref_[frame_heap_[next_pos]].KDistance() > max_distance) {
-            temp_queue[temp_size++] = next_pos;
-            ++next_pos;
-          }
-          if (next_pos <= static_cast<uint64_t>(frame_heap_[0]) &&
-              node_ref_[frame_heap_[next_pos]].KDistance() > max_distance) {  // left child
-            temp_queue[temp_size++] = next_pos;
-            ++next_pos;
-          }
+        if (next_pos <= static_cast<uint64_t>(frame_heap_[0]) &&
+            node_ref_[frame_heap_[next_pos]].KDistance() > max_distance) {  // left child
+          temp_queue[temp_size++] = next_pos;
+        }
+        ++next_pos;
+        if (next_pos <= static_cast<uint64_t>(frame_heap_[0]) &&
+            node_ref_[frame_heap_[next_pos]].KDistance() > max_distance) {  // right child
+          temp_queue[temp_size++] = next_pos;
         }
       }
     }
@@ -128,7 +131,7 @@ auto NodeHeap::Pop() -> frame_id_t {
     queue = std::move(temp_queue);
   }
 
-  if (max_frame > 0) {
+  if (max_frame >= 0) {
     // swap min frame and evictable max frame
     auto min_frame = frame_heap_[frame_heap_[0]];
     frame_heap_[frame_pos_map_[max_frame]] = min_frame;
@@ -151,10 +154,13 @@ void NodeHeap::Remove(const frame_id_t frame_id) {
 
   // move the lastest frame to cur pos
   auto cur_frame = frame_heap_[frame_heap_[0]];
+  frame_heap_[pos] = cur_frame;
   frame_pos_map_[cur_frame] = pos;
+  --frame_heap_[0];
 
   // correct heap tree;
   Amend(pos);
+  frame_pos_map_[frame_id] = INF;
 }
 
 void NodeHeap::Amend(size_t pos) {
@@ -225,6 +231,7 @@ void LRUKReplacer::SetEvictable(const frame_id_t frame_id, bool set_evictable) {
 
 void LRUKReplacer::Remove(const frame_id_t frame_id) {
   BUSTUB_ASSERT(static_cast<size_t>(frame_id) < replacer_size_, "invalid frame id!");
+  std::lock_guard lg(latch_);
   BUSTUB_ASSERT(node_store_[frame_id].Evictable(), "try to evict a non-evictable frame");
   if (node_store_[frame_id].Valid()) {
     node_store_[frame_id].SetInvalid();

@@ -11,6 +11,7 @@
 //===----------------------------------------------------------------------===//
 
 #pragma once
+#define BI_HEAP
 
 #include <cstddef>
 #include <limits>
@@ -74,9 +75,15 @@ class LRUKNode {
 
   void SetInvalid();
 
-  auto KDistance() -> size_t;
+  auto KDistance() const -> size_t { return k_distance_; }
 
   void Access(size_t timestamp);
+
+#ifdef BI_HEAP
+  auto K() const -> size_t { return k_; }
+
+  auto Distance() const -> size_t { return distance_; }
+#endif
 
  private:
   /** History of last seen K timestamps of this page. Least recent timestamp stored in front. */
@@ -85,8 +92,11 @@ class LRUKNode {
   std::vector<size_t> history_;
   size_t start_{0};
   size_t end_{0};
-  size_t k_;
   size_t k_distance_;
+#ifdef BI_HEAP
+  size_t k_;
+  size_t distance_;
+#endif
   bool is_evictable_{false};
 };
 

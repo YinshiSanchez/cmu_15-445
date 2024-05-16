@@ -208,5 +208,10 @@ class BufferPoolManager {
   }
 
   // TODO(student): You may add additional private members and helper functions
+
+  // shoud get latch_ before excute this function
+  void FlushFrame(frame_id_t frame_id);
+
+  void ReadFrame(frame_id_t frame_id);
 };
 }  // namespace bustub

@@ -1,3 +1,4 @@
+
 //===----------------------------------------------------------------------===//
 //
 //                         BusTub
@@ -12,9 +13,16 @@
 
 #pragma once
 
+#include <condition_variable>
+#include <cstddef>
 #include <future>  // NOLINT
+#include <mutex>
 #include <optional>
+#include <queue>
 #include <thread>  // NOLINT
+#include <thread>
+#include <type_traits>
+#include <utility>
 
 #include "common/channel.h"
 #include "storage/disk/disk_manager.h"
@@ -41,6 +49,47 @@ struct DiskRequest {
   /** Callback used to signal to the request issuer when the request has been completed. */
   std::promise<bool> callback_;
 };
+
+// class IOThreadPool {
+//  public:
+//   explicit IOThreadPool(size_t n) : stop_(false) {
+//     workers_.reserve(n);
+//     for (size_t i = 0; i < n; ++i) {
+//       workers_.emplace_back([this]() {
+//         while (true) {
+//           {
+//             std::unique_lock lock(queue_mtx_);
+//             condition.wait(lock, [this] { return !tasks_.empty() || stop_; });
+//             if (stop_) {
+//               return;
+//             }
+            
+//           }
+//         }
+//       });
+//     }
+//   }
+
+//   void Enqueue();
+
+//   ~IOThreadPool() {
+//     {
+//       std::unique_lock lock(queue_mtx_);
+//       stop_ = true;
+//     }
+//     condition.notify_all();
+//     for (auto &worker : workers_) {
+//       worker.join();
+//     }
+//   }
+
+//  private:
+//   bool stop_;
+//   std::mutex queue_mtx_;
+//   std::condition_variable condition;
+//   Channel<std::optional<DiskRequest>> tasks_;
+//   std::vector<std::thread> workers_;
+// };
 
 /**
  * @brief The DiskScheduler schedules disk read and write operations.
@@ -81,7 +130,7 @@ class DiskScheduler {
    *
    * @return std::promise<bool>
    */
-  auto CreatePromise() -> DiskSchedulerPromise { return {}; };
+  auto CreatePromise() -> DiskSchedulerPromise { return {}; }
 
  private:
   /** Pointer to the disk manager. */
