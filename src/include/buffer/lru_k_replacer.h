@@ -11,10 +11,10 @@
 //===----------------------------------------------------------------------===//
 
 #pragma once
-#define BI_HEAP
 
 #include <cstddef>
 #include <limits>
+#include <list>
 #include <mutex>  // NOLINT
 #include <vector>
 
@@ -79,12 +79,6 @@ class LRUKNode {
 
   void Access(size_t timestamp);
 
-#ifdef BI_HEAP
-  auto K() const -> size_t { return k_; }
-
-  auto Distance() const -> size_t { return distance_; }
-#endif
-
  private:
   /** History of last seen K timestamps of this page. Least recent timestamp stored in front. */
   // Remove maybe_unused if you start using them. Feel free to change the member variables as you want.
@@ -93,40 +87,109 @@ class LRUKNode {
   size_t start_{0};
   size_t end_{0};
   size_t k_distance_;
-#ifdef BI_HEAP
   size_t k_;
-  size_t distance_;
-#endif
   bool is_evictable_{false};
 };
 
-class NodeHeap {
+class LRUKImpl {
  public:
-  NodeHeap(size_t node_num, std::vector<LRUKNode> &node_ref);
+  LRUKImpl(size_t node_num, std::vector<LRUKNode> &node_ref);
 
-  /**
-   * if node
-   * 1. has been in heap: correct position of this node in heap
-   * 2. is not in heap: create a new entry and push into heap
-   */
   void Push(frame_id_t frame_id);
 
-  // pop an evictable node with the biggest k-distance
   auto Pop() -> frame_id_t;
 
-  // remove specific frame in heap
   void Remove(frame_id_t frame_id);
 
  private:
-  std::vector<LRUKNode> &node_ref_;     // reference to node store
-  std::vector<frame_id_t> frame_heap_;  // frame_heap_[0] is a sentinel element, is the size of heap;
-  std::vector<size_t> frame_pos_map_;   // map frame id to posistion in heap
+  struct ListNode {
+    ListNode *prev_;
+    ListNode *next_;
+    frame_id_t frame_id_;
+  };
 
-  /**
-   * @brief correct node posistion
-   * @param pos posistion of the node needed to be corrected in  heap
-   */
-  void Amend(size_t pos);
+  struct List {
+    ListNode *head_{nullptr};
+    ListNode *tail_{nullptr};
+    size_t size_{0};
+
+    ~List() {
+      auto curr = head_;
+      while (curr != nullptr) {
+        auto temp = curr;
+        curr = curr->next_;
+        delete temp;
+      }
+    }
+
+    // auto Push(frame_id_t frame_id) -> ListNode * {
+    //   ++size_;
+    //   ListNode *new_node = new ListNode{nullptr, nullptr, frame_id};
+    //   // push to tail
+    //   if (tail_ == nullptr) {  // empty list
+    //     head_ = new_node;
+    //   } else {
+    //     tail_->next_ = new_node;
+    //     new_node->prev_ = tail_;
+    //   }
+    //   tail_ = new_node;
+    //   return new_node;
+    // }
+
+    // auto Evict(std::vector<LRUKNode> &frame_ref) -> ListNode * {
+    //   auto curr = head_;
+    //   while (curr != nullptr) {
+    //     if (frame_ref[curr->frame_id_].Evictable()) {
+    //       return curr;
+    //     }
+    //     curr = curr->next_;
+    //   }
+    //   return nullptr;
+    // }
+
+    // void Remove(ListNode *node_ptr) {
+    //   --size_;
+    //   if (node_ptr->prev_ == nullptr) {  // node is head
+    //     head_ = node_ptr->next_;
+    //   } else {
+    //     node_ptr->prev_->next_ = node_ptr->next_;
+    //   }
+
+    //   if (node_ptr->next_ == nullptr) {
+    //     tail_ = node_ptr->prev_;
+    //   } else {
+    //     node_ptr->next_->prev_ = node_ptr->prev_;
+    //   }
+    //   delete node_ptr;
+    // }
+  };
+
+  union Pos {
+    ListNode *list_ptr_;
+    uint64_t heap_pos_;
+  };
+
+  std::vector<LRUKNode> &node_ref_;   // reference to node store
+  std::vector<frame_id_t> r_heap_;    // lru heap. heap_[0] is a sentinel element, indicate the size of heap;
+  List f_list_;                       // lfu list.
+  std::vector<Pos> frame_pos_map_;    // map frame id to posistion in heap/list
+  std::vector<char> frame_pos_type_;  // true is list, false is heap
+
+  void Push2List(frame_id_t frame_id);
+
+  // select a frame from list to evict, not actually to delete it
+  auto ListEvict() -> ListNode *;
+
+  void RemoveFromList(const ListNode *node_ptr);
+
+  void Push2Heap(frame_id_t frame_id, bool new_entry);
+
+  // select a frame from list to evict, not actually to delete it
+  auto HeapEvict() -> size_t;
+
+  void RemoveFromHeap(size_t pos);
+
+  void AmendHeap(size_t pos);
 };
 
 /**
@@ -244,7 +307,7 @@ class LRUKReplacer {
   // TODO(student): implement me! You can replace these member variables as you like.
   // Remove maybe_unused if you start using them.
   std::vector<LRUKNode> node_store_;
-  NodeHeap node_heap_;
+  LRUKImpl node_heap_;
   size_t current_timestamp_{0};
   size_t curr_size_{0};
   size_t replacer_size_;  // max size

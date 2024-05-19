@@ -51,52 +51,130 @@ void LRUKNode::Access(const size_t timestamp) {
   }
   history_[end_++] = timestamp;
   end_ = QUEUE_POS(end_, k_);
-#ifdef BI_HEAP
-#else
   if (QUEUE_SIZE(start_, end_, k_) < k_) {
     k_distance_ = SIZE_MAX - history_[start_];
   } else {
     k_distance_ = INF - history_[start_];
   }
-#endif
 }
 
 auto LRUKNode::Valid() const -> bool { return k_ != INF; }
 
 void LRUKNode::SetInvalid() { k_ = INF; }
 
-// NodeHeap
+// LRUKImpl
 
-NodeHeap::NodeHeap(const size_t node_num, std::vector<LRUKNode> &node_ref)
-    : node_ref_(node_ref), frame_heap_(node_num + 1), frame_pos_map_(node_num, INF) {
-  frame_heap_[0] = 0;
+LRUKImpl::LRUKImpl(const size_t node_num, std::vector<LRUKNode> &node_ref)
+    : node_ref_(node_ref), r_heap_(node_num + 1), frame_pos_map_(node_num, Pos{nullptr}), frame_pos_type_(node_num, 1) {
+  r_heap_[0] = 0;
 }
 
-void NodeHeap::Push(const frame_id_t frame_id) {
-  BUSTUB_ENSURE(static_cast<size_t>(frame_id) < frame_pos_map_.size(), "overflow frame id!");
-  if (frame_pos_map_[frame_id] == INF) {  // new entry
-    size_t cur_pos = ++frame_heap_[0];
+void LRUKImpl::Push(const frame_id_t frame_id) {
+  if (frame_pos_type_[frame_id] != 0) {
+    if (frame_pos_map_[frame_id].list_ptr_ == nullptr) {  // new entry;
+      Push2List(frame_id);
+    } else if (node_ref_[frame_id].KDistance() < INF) {  // amount of history record reach K
+      RemoveFromList(frame_pos_map_[frame_id].list_ptr_);
+      Push2Heap(frame_id, true);
+    }
+  } else {  // old entry in lru heap
+    Push2Heap(frame_id, false);
+  }
+}
+
+auto LRUKImpl::Pop() -> frame_id_t {
+  frame_id_t evict_frame = -1;
+  if (f_list_.size_ > 0) {
+    auto frame_ptr = ListEvict();
+    if (frame_ptr != nullptr) {
+      evict_frame = frame_ptr->frame_id_;
+      RemoveFromList(frame_ptr);
+    }
+  }
+  if (evict_frame == -1 && r_heap_[0] > 0) {
+    evict_frame = HeapEvict();
+    if (evict_frame != -1) {
+      RemoveFromHeap(frame_pos_map_[evict_frame].heap_pos_);
+    }
+  }
+
+  return evict_frame;
+}
+
+void LRUKImpl::Remove(const frame_id_t frame_id) {
+  if (frame_pos_type_[frame_id] != 0) {
+    RemoveFromList(frame_pos_map_[frame_id].list_ptr_);
+  } else {
+    RemoveFromHeap(frame_pos_map_[frame_id].heap_pos_);
+  }
+}
+
+void LRUKImpl::Push2List(frame_id_t frame_id) {
+  ++f_list_.size_;
+  auto new_node = new ListNode{nullptr, nullptr, frame_id};
+  // push to tail
+  if (f_list_.tail_ == nullptr) {  // empty list
+    f_list_.head_ = new_node;
+  } else {
+    f_list_.tail_->next_ = new_node;
+    new_node->prev_ = f_list_.tail_;
+  }
+  f_list_.tail_ = new_node;
+  frame_pos_map_[frame_id] = Pos{new_node};
+}
+
+auto LRUKImpl::ListEvict() -> ListNode * {
+  auto curr = f_list_.head_;
+  while (curr != nullptr) {
+    if (node_ref_[curr->frame_id_].Evictable()) {
+      return curr;
+    }
+    curr = curr->next_;
+  }
+  return nullptr;
+}
+void LRUKImpl::RemoveFromList(const ListNode *node_ptr) {
+  --f_list_.size_;
+  if (node_ptr->prev_ == nullptr) {  // node is head
+    f_list_.head_ = node_ptr->next_;
+  } else {
+    node_ptr->prev_->next_ = node_ptr->next_;
+  }
+
+  if (node_ptr->next_ == nullptr) {
+    f_list_.tail_ = node_ptr->prev_;
+  } else {
+    node_ptr->next_->prev_ = node_ptr->prev_;
+  }
+
+  frame_pos_map_[node_ptr->frame_id_] = Pos{nullptr};
+  delete node_ptr;
+}
+
+void LRUKImpl::Push2Heap(const frame_id_t frame_id, bool new_entry) {
+  if (new_entry) {  // new entry
+    size_t cur_pos = ++r_heap_[0];
     auto parent_pos = cur_pos >> 1;
     while (parent_pos > 0) {
-      if (node_ref_[frame_id].KDistance() > node_ref_[frame_heap_[parent_pos]].KDistance()) {
-        frame_heap_[cur_pos] = frame_heap_[parent_pos];
-        frame_pos_map_[frame_heap_[parent_pos]] = cur_pos;
+      if (node_ref_[frame_id].KDistance() > node_ref_[r_heap_[parent_pos]].KDistance()) {
+        r_heap_[cur_pos] = r_heap_[parent_pos];
+        frame_pos_map_[r_heap_[parent_pos]].heap_pos_ = cur_pos;
         cur_pos = parent_pos;
         parent_pos >>= 1;
       } else {
         break;
       }
     }
-    frame_heap_[cur_pos] = frame_id;
-    frame_pos_map_[frame_id] = cur_pos;
+    r_heap_[cur_pos] = frame_id;
+    frame_pos_type_[frame_id] = 0;
+    frame_pos_map_[frame_id].heap_pos_ = cur_pos;
   } else {  // old entry
-    Amend(frame_pos_map_[frame_id]);
+    AmendHeap(frame_pos_map_[frame_id].heap_pos_);
   }
 }
 
-auto NodeHeap::Pop() -> frame_id_t {
-  // BFS on heap
-  std::vector<size_t> queue((frame_heap_[0] + 1) >> 1);  // posistion of nodes in heap
+auto LRUKImpl::HeapEvict() -> size_t {
+  std::vector<size_t> queue((r_heap_[0] + 1) >> 1);  // posistion of nodes in heap
   size_t queue_size(1);
   size_t max_distance(0);
   int32_t max_frame(-1);
@@ -104,11 +182,11 @@ auto NodeHeap::Pop() -> frame_id_t {
   queue[0] = 1;
 
   while (queue_size > 0) {
-    std::vector<size_t> temp_queue((frame_heap_[0] + 1) >> 1);
+    std::vector<size_t> temp_queue((r_heap_[0] + 1) >> 1);
     size_t temp_size(0);
 
     for (size_t i = 0; i < queue_size; ++i) {
-      auto cur_frame = frame_heap_[queue[i]];
+      auto cur_frame = r_heap_[queue[i]];
       if (node_ref_[cur_frame].Evictable()) {
         if (node_ref_[cur_frame].KDistance() > max_distance) {
           max_frame = cur_frame;
@@ -116,13 +194,13 @@ auto NodeHeap::Pop() -> frame_id_t {
         }
       } else {  // cur_frame is non-evictable
         auto next_pos = queue[i] << 1;
-        if (next_pos <= static_cast<uint64_t>(frame_heap_[0]) &&
-            node_ref_[frame_heap_[next_pos]].KDistance() > max_distance) {  // left child
+        if (next_pos <= static_cast<uint64_t>(r_heap_[0]) &&
+            node_ref_[r_heap_[next_pos]].KDistance() > max_distance) {  // left child
           temp_queue[temp_size++] = next_pos;
         }
         ++next_pos;
-        if (next_pos <= static_cast<uint64_t>(frame_heap_[0]) &&
-            node_ref_[frame_heap_[next_pos]].KDistance() > max_distance) {  // right child
+        if (next_pos <= static_cast<uint64_t>(r_heap_[0]) &&
+            node_ref_[r_heap_[next_pos]].KDistance() > max_distance) {  // right child
           temp_queue[temp_size++] = next_pos;
         }
       }
@@ -131,54 +209,42 @@ auto NodeHeap::Pop() -> frame_id_t {
     queue = std::move(temp_queue);
   }
 
-  if (max_frame >= 0) {
-    // swap min frame and evictable max frame
-    auto min_frame = frame_heap_[frame_heap_[0]];
-    frame_heap_[frame_pos_map_[max_frame]] = min_frame;
-    frame_pos_map_[min_frame] = frame_pos_map_[max_frame];
-    --frame_heap_[0];
-
-    // correct node posistion
-    Amend(frame_pos_map_[max_frame]);
-    frame_pos_map_[max_frame] = INF;
-  }
-
   return max_frame;
 }
 
-void NodeHeap::Remove(const frame_id_t frame_id) {
-  size_t pos = frame_pos_map_[frame_id];
+void LRUKImpl::RemoveFromHeap(const size_t pos) {
   BUSTUB_ASSERT(pos != INF, "try to remove an invalid frame");
 
-  frame_pos_map_[frame_id] = INF;
-
   // move the lastest frame to cur pos
-  auto cur_frame = frame_heap_[frame_heap_[0]];
-  frame_heap_[pos] = cur_frame;
-  frame_pos_map_[cur_frame] = pos;
-  --frame_heap_[0];
+  auto remove_frame = r_heap_[pos];
+  frame_pos_type_[remove_frame] = 1;
+  frame_pos_map_[remove_frame].list_ptr_ = nullptr;
+
+  auto cur_frame = r_heap_[r_heap_[0]];
+  r_heap_[pos] = cur_frame;
+  frame_pos_map_[cur_frame].heap_pos_ = pos;
+  --r_heap_[0];
 
   // correct heap tree;
-  Amend(pos);
-  frame_pos_map_[frame_id] = INF;
+  AmendHeap(pos);
 }
 
-void NodeHeap::Amend(size_t pos) {
+void LRUKImpl::AmendHeap(size_t pos) {
   int32_t cur_pos = pos;
   int32_t next_pos = pos << 1;
-  while (next_pos <= frame_heap_[0]) {
-    if (next_pos < frame_heap_[0] &&
-        node_ref_[frame_heap_[next_pos]].KDistance() < node_ref_[frame_heap_[next_pos + 1]].KDistance()) {
+  while (next_pos <= r_heap_[0]) {
+    if (next_pos < r_heap_[0] &&
+        node_ref_[r_heap_[next_pos]].KDistance() < node_ref_[r_heap_[next_pos + 1]].KDistance()) {
       ++next_pos;
     }
-    auto cur_frame = frame_heap_[cur_pos];
-    auto next_frame = frame_heap_[next_pos];
+    auto cur_frame = r_heap_[cur_pos];
+    auto next_frame = r_heap_[next_pos];
     if (node_ref_[cur_frame].KDistance() > node_ref_[next_frame].KDistance()) {
       break;
     }
 
     std::swap(frame_pos_map_[cur_frame], frame_pos_map_[next_frame]);
-    std::swap(frame_heap_[cur_pos], frame_heap_[next_pos]);
+    std::swap(r_heap_[cur_pos], r_heap_[next_pos]);
     cur_pos = next_pos;
     next_pos <<= 1;
   }
@@ -211,7 +277,7 @@ void LRUKReplacer::RecordAccess(const frame_id_t frame_id, [[maybe_unused]] Acce
   if (!node.Valid()) {
     node.Init(k_);
   }
-  node.Access(current_timestamp_++);
+  node.Access(++current_timestamp_);
   node_heap_.Push(frame_id);
 }
 
