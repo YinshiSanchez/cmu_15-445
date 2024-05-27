@@ -1,4 +1,5 @@
 #include <chrono>
+#include <cstdio>
 #include <exception>
 #include <iostream>
 #include <memory>
@@ -24,6 +25,8 @@
 #include "storage/disk/disk_manager_memory.h"
 
 #include <sys/time.h>
+
+#define SMALL_DBG
 
 auto ClockMs() -> uint64_t {
   struct timeval tm;
@@ -114,7 +117,8 @@ auto ModifyPage(char *data, size_t page_idx, uint64_t seed) -> void {
 auto CheckPageConsistentNoSeed(const char *data, size_t page_idx) -> void {
   const auto *pg = reinterpret_cast<const BustubBenchPageHeader *>(data);
   if (pg->page_id_ != page_idx) {
-    fmt::println(stderr, "page header not consistent: page_id_={} page_idx={}", pg->page_id_, page_idx);
+    fmt::println(stderr, "thread{}: page header not consistent: page_id_={} page_idx={}", std::this_thread::get_id(),
+                 pg->page_id_, page_idx);
     std::terminate();
   }
   auto left = static_cast<unsigned int>(static_cast<unsigned char>(pg->data_[pg->seed_ % 4000]));
@@ -129,7 +133,8 @@ auto CheckPageConsistentNoSeed(const char *data, size_t page_idx) -> void {
 auto CheckPageConsistent(const char *data, size_t page_idx, uint64_t seed) -> void {
   const auto *pg = reinterpret_cast<const BustubBenchPageHeader *>(data);
   if (pg->seed_ != seed) {
-    fmt::println(stderr, "page seed not consistent: seed_={} seed={}", pg->seed_, seed);
+    fmt::println(stderr, "thread{}: page {} seed not consistent: seed_={} seed={}", std::this_thread::get_id(),
+                 page_idx, pg->seed_, seed);
     std::terminate();
   }
   CheckPageConsistentNoSeed(data, page_idx);
@@ -239,6 +244,7 @@ auto main(int argc, char **argv) -> int {
       size_t page_idx = page_idx_start;
 
       while (!metrics.ShouldFinish()) {
+        // fmt::println(stderr, "fetch page {}",page_idx);
         auto *page = bpm->FetchPage(page_ids[page_idx], AccessType::Scan);
         if (page == nullptr) {
           continue;
