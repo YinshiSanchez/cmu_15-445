@@ -12,13 +12,19 @@
 
 #pragma once
 
+#include <atomic>
+#include <condition_variable>
+#include <cstddef>
 #include <list>
 #include <memory>
 #include <mutex>  // NOLINT
 #include <unordered_map>
+#include <utility>
+#include <vector>
 
 #include "buffer/lru_k_replacer.h"
 #include "common/config.h"
+#include "common/rwlatch.h"
 #include "recovery/log_manager.h"
 #include "storage/disk/disk_scheduler.h"
 #include "storage/page/page.h"
@@ -192,6 +198,8 @@ class BufferPoolManager {
   std::list<frame_id_t> free_list_;
   /** This latch protects shared data structures. We recommend updating this comment to describe what it protects. */
   std::mutex latch_;
+
+  std::vector<std::pair<std::condition_variable, bool>> avaliable_;
 
   /**
    * @brief Allocate a page on disk. Caller should acquire the latch before calling this function.
