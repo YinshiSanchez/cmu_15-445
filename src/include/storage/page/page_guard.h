@@ -1,5 +1,7 @@
 #pragma once
 
+#include <cstdio>
+#include <utility>
 #include "storage/page/page.h"
 
 namespace bustub {
@@ -115,6 +117,7 @@ class ReadPageGuard {
  public:
   ReadPageGuard() = default;
   ReadPageGuard(BufferPoolManager *bpm, Page *page) : guard_(bpm, page) {}
+  explicit ReadPageGuard(BasicPageGuard &&guard) : guard_(std::move(guard)) {}
   ReadPageGuard(const ReadPageGuard &) = delete;
   auto operator=(const ReadPageGuard &) -> ReadPageGuard & = delete;
 
@@ -174,7 +177,8 @@ class ReadPageGuard {
 class WritePageGuard {
  public:
   WritePageGuard() = default;
-  WritePageGuard(BufferPoolManager *bpm, Page *page) : guard_(bpm, page) {}
+  WritePageGuard(BufferPoolManager *bpm, Page *page) : guard_(bpm, page) { guard_.is_dirty_ = true; }
+  explicit WritePageGuard(BasicPageGuard &&guard) : guard_(std::move(guard)) { guard_.is_dirty_ = true; }
   WritePageGuard(const WritePageGuard &) = delete;
   auto operator=(const WritePageGuard &) -> WritePageGuard & = delete;
 
