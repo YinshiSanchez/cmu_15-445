@@ -23,6 +23,7 @@
 #include <thread>  // NOLINT
 #include <type_traits>
 #include <utility>
+#include <vector>
 
 #include "common/channel.h"
 #include "storage/disk/disk_manager.h"
