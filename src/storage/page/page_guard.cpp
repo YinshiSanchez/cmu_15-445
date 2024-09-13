@@ -74,6 +74,7 @@ void ReadPageGuard::Drop() {
 
 ReadPageGuard::~ReadPageGuard() {
   if (guard_.page_ != nullptr) {
+    // guard_.Drop();
     guard_.page_->RUnlatch();
   }
 }  // NOLINT
